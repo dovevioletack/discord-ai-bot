@@ -452,7 +452,8 @@ There are ${members.size} members in the server which are ${[...members.values()
                 displayName: member.displayName,
                 username: member.user.username,
                 createdTimestamp: member.user.createdTimestamp,
-                joinedTimestamp: member.joinedTimestamp
+                joinedTimestamp: member.joinedTimestamp,
+                roles: [...member.roles.cache.values()].map(role => role.name)
             })).join(", ")}
 
 Please note that there might be some weird artifacts in the role, channel, and server names like a strange character prefix, typos, random characters, so remove the artifacts and typos in the name when you're providing them. Remove the typos also when you're asked or providing the names, but do not fix typos in usernames.
