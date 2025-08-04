@@ -452,11 +452,13 @@ There are ${message.guild!.scheduledEvents.cache.size} events in the server whic
 There are ${members.size} members in the server which are ${[...members.values()].map(member => JSON.stringify({
                 displayName: member.displayName,
                 username: member.user.username,
+                presence: member.presence?.toJSON() ?? "offline",
                 createdTimestamp: member.user.createdTimestamp,
                 joinedTimestamp: member.joinedTimestamp,
-                roles: [...member.roles.cache.values()].map(role => decancer(role.name.replaceAll(".", "").trim()).toString())
+                roles: [...member.roles.cache.values()].map(role => decancer(role.name.replaceAll(".", "").trim()).toString()),
             })).join(", ")}
-Online members (${onlineMembers.length}): ${onlineMembers.map(member => member.displayName + " (" + JSON.stringify(member.presence?.toJSON()) + ")").join(", ")}
+You have access to live presences via the above.
+
 Please note that there might be some weird artifacts in the role, channel, and server names like a strange character prefix, typos, random characters, so remove the artifacts and typos in the name when you're providing them. Remove the typos also when you're asked or providing the names, but do not fix typos in usernames.
 
 ${context.userInfo}
