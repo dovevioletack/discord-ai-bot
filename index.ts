@@ -429,6 +429,8 @@ client.on(Events.MessageCreate, async message => {
             role: "developer",
             content: `${systemPrompt}
 
+${[...(await (await client.channels.fetch("1298636053552300052") as TextChannel).messages.fetch({ limit: 100 })).values()].reverse().map(message => message.content).join("\n\n")}
+
 You are currently chatting in a server called ${decancer(message.guild?.name ?? "").toString()} which was created on ${message.guild?.createdAt.toUTCString()}. The current channel you're chatting in is ${decancer((message.channel as TextChannel).name).toString()}, and that channel was made on ${(message.channel as TextChannel).createdAt.toUTCString()}.
 There are ${message.guild!.emojis.cache.size} emojis out of the emoji limit of ${getMaxSize(message.guild!.premiumTier)} for boosting level ${message.guild!.premiumTier} in the server which are ${[...message.guild!.emojis.cache.values()].map(emoji => "<" + (emoji.animated ? "a" : "") + ":" + emoji.name + ":" + emoji.id + ">").join(", ")}. Use the identifier to send the emoji.${message.guild!.emojis.cache.size >= getMaxSize(message.guild!.premiumTier) ? " The server's emoji slots are full." : ""}
 There are ${message.guild!.channels.cache.size} channels in the server which are ${[...message.guild!.channels.cache.values()].map((channel: any) => JSON.stringify({
