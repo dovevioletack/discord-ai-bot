@@ -454,7 +454,7 @@ There are ${members.size} members in the server which are ${[...members.values()
                 username: member.user.username,
                 createdTimestamp: member.user.createdTimestamp,
                 joinedTimestamp: member.joinedTimestamp,
-                roles: [...member.roles.cache.values()].map(role => role.name)
+                roles: [...member.roles.cache.values()].map(role => decancer(role.name.replaceAll(".", "").trim()).toString())
             })).join(", ")}
 Online members (${onlineMembers.length}): ${onlineMembers.map(member => member.displayName + " (" + JSON.stringify(member.presence?.toJSON()) + ")").join(", ")}
 Please note that there might be some weird artifacts in the role, channel, and server names like a strange character prefix, typos, random characters, so remove the artifacts and typos in the name when you're providing them. Remove the typos also when you're asked or providing the names, but do not fix typos in usernames.
