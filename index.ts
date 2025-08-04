@@ -170,7 +170,7 @@ const openai = new OpenAI({
     baseURL: "https://openrouter.ai/api/v1"
 });
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildPresences] });
 
 client.on(Events.ClientReady, readyClient => {
     console.log(`Logged in as ${readyClient.user.tag}!`);
@@ -424,6 +424,7 @@ client.on(Events.MessageCreate, async message => {
     const context = await fetchContext(message.channel as TextChannel);
 
     const members = await message.guild!.members.fetch();
+    const onlineMembers = [...members.values()].filter(member => member.presence && member.presence?.status !== "offline");
     const messages: OpenAI.ChatCompletionMessageParam[] = [
         {
             role: "developer",
@@ -455,7 +456,7 @@ There are ${members.size} members in the server which are ${[...members.values()
                 joinedTimestamp: member.joinedTimestamp,
                 roles: [...member.roles.cache.values()].map(role => role.name)
             })).join(", ")}
-
+Online members (${onlineMembers.length}): ${onlineMembers.map(member => member.displayName + " (" + JSON.stringify(member.presence?.toJSON()) + ")").join(", ")}
 Please note that there might be some weird artifacts in the role, channel, and server names like a strange character prefix, typos, random characters, so remove the artifacts and typos in the name when you're providing them. Remove the typos also when you're asked or providing the names, but do not fix typos in usernames.
 
 ${context.userInfo}
@@ -465,6 +466,7 @@ Reply times in CET/CEST depending on daylight savings unless otherwise specified
         },
         ...context.messages
     ];
+    console.log(messages)
     console.log(messages.reduce((l, c) => l + (c.content?.length ?? 0), 0));
 
     const response = await openAiWithExponentialBackoff({
