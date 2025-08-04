@@ -225,7 +225,7 @@ ${sanitize(message.author.displayName)} joined on ${message.member?.joinedAt?.to
             stickers.push({
                 "type": "image_url",
                 "image_url": {
-                    "detail": "high",
+                    "detail": messageCount < 10 ? "high" : "low",
                     "url": cachedImages[sticker.url] ?? await urlToDataURL(sticker.url)
                 }
             })
