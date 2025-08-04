@@ -498,3 +498,10 @@ Reply times in CET/CEST depending on daylight savings unless otherwise specified
     }
 })
 client.login(process.env.token);
+
+Bun.serve({
+    port: 3000,
+    fetch(req) {
+    return new Response("cat");
+    }
+});
