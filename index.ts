@@ -1,7 +1,12 @@
 import { Client, Events, GatewayIntentBits, TextChannel } from 'discord.js';
+import type { Message } from "discord.js";
 import OpenAI from 'openai';
 import decancer from 'decancer';
 import { JSDOM } from "jsdom";
+import gifFrames from "gif-frames";
+
+import { extractFrames } from "./splitGif.ts";
+import { fileTypeFromBuffer } from "file-type";
 
 export async function scrapeSearxPage(input: { html?: string; url?: string }) {
     if (!input.html && !input.url) {
@@ -152,7 +157,9 @@ If the user asks you about something that sounds like a user or a fictional nati
 
 If the user asks you any question about a non VW community related topic, you should search the web even if you're sure.
 
-Remember that you can't provide images nor links that you haven't memorized.
+Remember that you can't provide images nor links that you haven't memorized and that the tool you're using hasn't returned.
+
+Use the server_info function if the user asks you any question about a member, emoji, role, event, channel, or presences.
 
 Remember that you're chatting in a Discord chat. Keep your responses under the character limit of 2000 characters. You are not to type @everyone nor @here unless otherwise requested. When asked about roles, type "everyone" instead of @everyone.
 
@@ -164,7 +171,9 @@ You use fragmented sentences by dropping phrases like “so whats up” with zer
 
 Nearly every message you type is just a single phrase or sentence fragment—think 3–8 words, tops. When you go beyond a few words, it’s still under 15–20 words and usually just one quick thought. You’ll never see you weaving a long explanation—everything is a snap reaction or update.
 
-You don't send emojis in your responses most of the time unless otherwise specified or requested.`
+You don't send emojis in your responses most of the time unless otherwise specified or requested.
+
+Think before you write your message by having a <think> XML tag at the start of your message with a detailed thought process with grammar. Start your message with <think>. Do not include </think> in your thought process until you're ready to write your message. Your thought process should ideally be at least a paragraph or two. The longer the thought process is, the better. Don't be afraid if the thought process is over several paragraphs.`
 
 const openai = new OpenAI({
     baseURL: "https://openrouter.ai/api/v1"
@@ -183,6 +192,48 @@ const sanitize = (input: string): string => {
 }
 
 const cachedImages: Record<string, string> = {};
+
+async function getKeyFrameDataURLs(gifPath: string) {
+    const allFrames = await gifFrames({ url: gifPath, frames: 'all', outputType: 'png' });
+    const total = allFrames.length;
+    if (total === 0) return [];
+
+    const indices = Array.from(
+        new Set([
+            0,
+            Math.floor(total * 0.1),
+            Math.floor(total * 0.2),
+            Math.floor(total * 0.3),
+            Math.floor(total * 0.4),
+            Math.floor(total * 0.5),
+            Math.floor(total * 0.6),
+            Math.floor(total * 0.7),
+            Math.floor(total * 0.8),
+            Math.floor(total * 0.9),
+        ].filter(i => i >= 0 && i < total))
+    ).sort((a, b) => a - b);
+
+    const keyFrames = await gifFrames({ url: gifPath, frames: indices, outputType: 'png' });
+
+    const dataUrls = await Promise.all(
+        keyFrames.map(frame =>
+            new Promise((resolve, reject) => {
+                const bufs: Buffer[] = [];
+                frame.getImage()
+                    .on('data', chunk => bufs.push(chunk))
+                    .on('end', () => {
+                        const buffer = Buffer.concat(bufs);
+                        const base64 = buffer.toString('base64');
+                        resolve(`data:image/png;base64,${base64}`);
+                    })
+                    .on('error', reject);
+            })
+        )
+    ) as string[];
+
+    return dataUrls;
+}
+
 /**
  * Convert a remote URL to a Data URL (base64).
  * Note: Must respect CORS — the server needs to allow it.
@@ -197,7 +248,7 @@ const urlToDataURL = async (url: string) => {
     const buffer = Buffer.from(await res.arrayBuffer());
     const base64 = buffer.toString('base64');
     cachedImages[url] = `data:${contentType};base64,${base64}`;
-    return `data:${contentType};base64,${base64}`;
+    return { contentType, buffer, url: `data:${contentType};base64,${base64}` };
 }
 
 const fetchContext = async (channel: TextChannel) => {
@@ -211,23 +262,62 @@ ${sanitize(message.author.displayName)} joined on ${message.member?.joinedAt?.to
         }
         const attachments = [];
         const stickers = [];
-        for (const attachment of message.attachments.values()) {
-            if (!attachment.contentType?.startsWith("image/")) continue;
-            attachments.push({
-                "type": "image_url",
-                "image_url": {
-                    "detail": messageCount < 10 ? "high" : "low",
-                    "url": cachedImages[attachment.url] ?? await urlToDataURL(attachment.url)
+        let hasAnimated = false;
+        if (messageCount < 30) {
+            for (const attachment of message.attachments.values()) {
+                if (!attachment.contentType?.startsWith("image/")) continue;
+                const data = await urlToDataURL(attachment.url);
+                if (data.contentType === "image/gif") {
+                    for (const url of await getKeyFrameDataURLs(data.url)) {
+                        attachments.push({
+                            "type": "image_url",
+                            "image_url": {
+                                "detail": messageCount < 10 ? "high" : "low",
+                                "url": url
+                            }
+                        })
+                    }
+                    hasAnimated = true;
+                } else {
+                    attachments.push({
+                        "type": "image_url",
+                        "image_url": {
+                            "detail": messageCount < 10 ? "high" : "low",
+                            "url": cachedImages[attachment.url] ?? data.url
+                        }
+                    })
                 }
-            })
+            }
+            for (const sticker of message.stickers.values()) {
+                const data = await urlToDataURL(sticker.url);
+                const fileType = await fileTypeFromBuffer(data.buffer);
+                if (data.contentType === "image/gif" || fileType?.mime === "image/apng") {
+                    for (const buffer of await extractFrames(data.buffer)) {
+                        console.log(`data:${data.contentType};base64,${buffer.toString("base64")}`)
+                        stickers.push({
+                            "type": "image_url",
+                            "image_url": {
+                                "detail": messageCount < 10 ? "high" : "low",
+                                "url": `data:${data.contentType};base64,${buffer.toString("base64")}`
+                            }
+                        })
+                    }
+                    hasAnimated = true;
+                } else {
+                    stickers.push({
+                        "type": "image_url",
+                        "image_url": {
+                            "detail": messageCount < 10 ? "high" : "low",
+                            "url": cachedImages[sticker.url] ?? data.url
+                        }
+                    })
+                }
+            }
         }
-        for (const sticker of message.stickers.values()) {
-            stickers.push({
-                "type": "image_url",
-                "image_url": {
-                    "detail": messageCount < 10 ? "high" : "low",
-                    "url": cachedImages[sticker.url] ?? await urlToDataURL(sticker.url)
-                }
+        if (hasAnimated) {
+            messages.push({
+                role: "developer" as "system",
+                content: "Please note that the above message contains an animated GIF that is shown to you as multiple images of different frames, and to the user, it's just a GIF."
             })
         }
         messages.push({
@@ -271,9 +361,11 @@ async function openAiWithExponentialBackoff(
     let attempt = 0;
     while (true) {
         try {
-            return await openai.chat.completions.create(body);
+            const response = await openai.chat.completions.create(body);
+            if ("error" in response) throw response;
+            return response;
         } catch (error) {
-            if (!Error.isError(error)) throw error;
+            if (!Error.isError(error) && !(error as any)?.error) throw error;
             const err = error as any;
             console.error(err);
             console.error(JSON.stringify(err, null, 4))
@@ -378,9 +470,24 @@ const tools: OpenAI.ChatCompletionTool[] = [
             strict: true
         }
     },
+    {
+        type: "function",
+        function: {
+            name: "server_info",
+            description: "Returns information about emojis, roles, channels, events, and emojis.",
+            parameters: {
+                type: "object",
+                properties: {
+                },
+                required: [],
+                additionalProperties: false
+            },
+            strict: true
+        }
+    },
 ];
 
-const callFunction = async (name: string, args: any) => {
+const callFunction = async (name: string, args: any, message: Message) => {
     console.log(name);
     console.log(args);
     if (name === "search_wiki") {
@@ -409,6 +516,33 @@ ${await fetchFirstWikiResultContent("https://mijoviewerswar.miraheze.org/w/api.p
             })).text()
         }));
     }
+    if (name === "server_info") {
+        const members = await message.guild!.members.fetch();
+        return `There are ${message.guild!.emojis.cache.size} emojis out of the emoji limit of ${getMaxSize(message.guild!.premiumTier)} for boosting level ${message.guild!.premiumTier} in the server which are ${[...message.guild!.emojis.cache.values()].map(emoji => "<" + (emoji.animated ? "a" : "") + ":" + emoji.name + ":" + emoji.id + ">").join(", ")}. Use the identifier to send the emoji.${message.guild!.emojis.cache.size >= getMaxSize(message.guild!.premiumTier) ? " The server's emoji slots are full." : ""}
+There are ${message.guild!.channels.cache.size} channels in the server which are ${[...message.guild!.channels.cache.values()].map((channel: any) => JSON.stringify({
+            position: channel.position,
+            name: channel.name,
+            id: channel.id,
+            parentId: channel.parentId,
+            topic: channel.topic,
+            createdTimestamp: channel.createdTimestamp
+        })).join(", ")}.
+There are ${message.guild!.roles.cache.size} roles in the server which are ${[...message.guild!.roles.cache.values()].map(role => JSON.stringify({
+            id: role.id,
+            name: role.name,
+            position: role.position,
+            hexColor: role.hexColor
+        })).join(", ")}.
+There are ${message.guild!.scheduledEvents.cache.size} events in the server which are ${[...message.guild!.scheduledEvents.cache.values()].map(event => JSON.stringify(event.toJSON())).join(", ")}.
+There are ${members.size} members in the server which are ${[...members.values()].map(member => JSON.stringify({
+            displayName: member.displayName,
+            username: member.user.username,
+            presence: member.presence?.toJSON() ?? "offline",
+            createdTimestamp: member.user.createdTimestamp,
+            joinedTimestamp: member.joinedTimestamp,
+            roles: [...member.roles.cache.values()].map(role => decancer(role.name.replaceAll(".", "").trim()).toString()),
+        })).join(", ")}`
+    }
     return "Invalid function called.";
 }
 
@@ -423,52 +557,39 @@ client.on(Events.MessageCreate, async message => {
 
     const context = await fetchContext(message.channel as TextChannel);
 
+    const mgtvMessages = [...(await (await client.channels.fetch("1298636053552300052") as TextChannel).messages.fetch({ limit: 20 })).values()].reverse();
+    const parsedMGTV = [];
+    for (const message of mgtvMessages) {
+        const bigEqRE = /={10,}/m;
+        const match = bigEqRE.exec(message.content);
+        parsedMGTV.push(match ? message.content.slice(0, match.index).trimEnd() : message.content);
+    }
+
     const members = await message.guild!.members.fetch();
-    const onlineMembers = [...members.values()].filter(member => member.presence && member.presence?.status !== "offline");
     const messages: OpenAI.ChatCompletionMessageParam[] = [
         {
             role: "developer",
             content: `${systemPrompt}
 
-${[...(await (await client.channels.fetch("1298636053552300052") as TextChannel).messages.fetch({ limit: 100 })).values()].reverse().map(message => message.content).join("\n\n")}
+${parsedMGTV.join("\n\n")}
 
 You are currently chatting in a server called ${decancer(message.guild?.name ?? "").toString()} which was created on ${message.guild?.createdAt.toUTCString()}. The current channel you're chatting in is ${decancer((message.channel as TextChannel).name).toString()}, and that channel was made on ${(message.channel as TextChannel).createdAt.toUTCString()}.
 There are ${message.guild!.emojis.cache.size} emojis out of the emoji limit of ${getMaxSize(message.guild!.premiumTier)} for boosting level ${message.guild!.premiumTier} in the server which are ${[...message.guild!.emojis.cache.values()].map(emoji => "<" + (emoji.animated ? "a" : "") + ":" + emoji.name + ":" + emoji.id + ">").join(", ")}. Use the identifier to send the emoji.${message.guild!.emojis.cache.size >= getMaxSize(message.guild!.premiumTier) ? " The server's emoji slots are full." : ""}
-There are ${message.guild!.channels.cache.size} channels in the server which are ${[...message.guild!.channels.cache.values()].map((channel: any) => JSON.stringify({
-                position: channel.position,
-                name: channel.name,
-                id: channel.id,
-                parentId: channel.parentId,
-                topic: channel.topic,
-                createdTimestamp: channel.createdTimestamp
-            })).join(", ")}.
-There are ${message.guild!.roles.cache.size} roles in the server which are ${[...message.guild!.roles.cache.values()].map(role => JSON.stringify({
-                id: role.id,
-                name: role.name,
-                position: role.position,
-                hexColor: role.hexColor
-            })).join(", ")}.
+There are ${message.guild!.channels.cache.size} channels in the server which are ${[...message.guild!.channels.cache.values()].map((channel: any) => channel.name).join(", ")}.
+There are ${message.guild!.roles.cache.size} roles in the server which are ${[...message.guild!.roles.cache.values()].map(role => role.name).join(", ")}.
 There are ${message.guild!.scheduledEvents.cache.size} events in the server which are ${[...message.guild!.scheduledEvents.cache.values()].map(event => JSON.stringify(event.toJSON())).join(", ")}.
-There are ${members.size} members in the server which are ${[...members.values()].map(member => JSON.stringify({
-                displayName: member.displayName,
-                username: member.user.username,
-                presence: member.presence?.toJSON() ?? "offline",
-                createdTimestamp: member.user.createdTimestamp,
-                joinedTimestamp: member.joinedTimestamp,
-                roles: [...member.roles.cache.values()].map(role => decancer(role.name.replaceAll(".", "").trim()).toString()),
-            })).join(", ")}
-You have access to live presences via the above.
+There are ${members.size} members in the server which are ${[...members.values()].map(member => member.displayName).join(", ")}
 
 Please note that there might be some weird artifacts in the role, channel, and server names like a strange character prefix, typos, random characters, so remove the artifacts and typos in the name when you're providing them. Remove the typos also when you're asked or providing the names, but do not fix typos in usernames.
 
 ${context.userInfo}
 
 The current date and time is: ${(new Date()).toUTCString()}
-Reply times in CET/CEST depending on daylight savings unless otherwise specified or requested. Use CET/CEST if they ask what time it is.`
+Reply times in CET/CEST depending on daylight savings unless otherwise specified or requested. Use CET/CEST if they ask what time it is.
+Remember to begin your message with <think>`
         },
         ...context.messages
     ];
-    console.log(messages)
     console.log(messages.reduce((l, c) => l + (c.content?.length ?? 0), 0));
 
     const response = await openAiWithExponentialBackoff({
@@ -478,6 +599,7 @@ Reply times in CET/CEST depending on daylight savings unless otherwise specified
     });
 
     console.log(response);
+    console.log(response.choices[0]?.message)
 
     if (response.choices[0]?.message.tool_calls) {
         messages.push(response.choices[0]?.message);
@@ -485,7 +607,7 @@ Reply times in CET/CEST depending on daylight savings unless otherwise specified
             const name = toolCall.function.name;
             const args = JSON.parse(toolCall.function.arguments);
 
-            const result = await callFunction(name, args);
+            const result = await callFunction(name, args, message);
             console.log(result);
             messages.push({
                 role: "tool",
@@ -497,11 +619,13 @@ Reply times in CET/CEST depending on daylight savings unless otherwise specified
             model: "openrouter/horizon-beta",
             messages
         });
+        console.log(responseB);
+        console.log(responseB.choices[0]?.message)
         clearInterval(typingInterval);
-        await message.reply(responseB.choices[0]?.message.content ?? ":skull:");
+        await message.reply((responseB.choices[0]?.message.content?.match(/<think>[\s\S]*?<\/think>([\s\S]*)/i)?.[1] || response.choices[0]?.message.content) ?? ":skull:");
     } else {
         clearInterval(typingInterval);
-        await message.reply(response.choices[0]?.message.content ?? ":skull:");
+        await message.reply((response.choices[0]?.message.content?.match(/<think>[\s\S]*?<\/think>([\s\S]*)/i)?.[1] || response.choices[0]?.message.content) ?? ":skull:");
     }
 })
 client.login(process.env.token);
@@ -509,6 +633,6 @@ client.login(process.env.token);
 Bun.serve({
     port: 3000,
     fetch(req) {
-    return new Response("cat");
+        return new Response("cat");
     }
 });
