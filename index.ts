@@ -267,13 +267,15 @@ ${sanitize(message.author.displayName)} joined on ${message.member?.joinedAt?.to
             for (const attachment of message.attachments.values()) {
                 if (!attachment.contentType?.startsWith("image/")) continue;
                 const data = await urlToDataURL(attachment.url);
-                if (data.contentType === "image/gif") {
-                    for (const url of await getKeyFrameDataURLs(data.url)) {
-                        attachments.push({
+                const fileType = await fileTypeFromBuffer(data.buffer);
+                if (data.contentType === "image/gif" || fileType?.mime === "image/apng") {
+                    for (const buffer of await extractFrames(data.buffer)) {
+                        console.log(`data:${data.contentType};base64,${buffer.toString("base64")}`)
+                        stickers.push({
                             "type": "image_url",
                             "image_url": {
                                 "detail": messageCount < 10 ? "high" : "low",
-                                "url": url
+                                "url": `data:${data.contentType};base64,${buffer.toString("base64")}`
                             }
                         })
                     }
