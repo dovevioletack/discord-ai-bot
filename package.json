@@ -11,9 +11,13 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@types/gifsicle": "^5.2.2",
     "decancer": "^3.3.3",
     "discord.js": "^14.21.0",
+    "file-type": "^21.0.0",
+    "gif-frames": "^1.0.1",
     "jsdom": "^26.1.0",
-    "openai": "^5.11.0"
+    "openai": "^5.11.0",
+    "sharp-apng": "^0.1.5"
   }
 }
