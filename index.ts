@@ -643,7 +643,7 @@ Reply times in CET/CEST depending on daylight savings unless otherwise specified
             });
         }
         const responseB = await openAiWithExponentialBackoff({
-            model: "gpt-5-nano",
+            model: "openrouter/polaris-alpha",
             messages
         });
         console.log(responseB);
